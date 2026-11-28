@@ -12,20 +12,20 @@ const focusToast = message => { const node = document.querySelector("#toast"); n
 focusApi("/api/health").then(status => {
   if (status.ai_provider) {
     document.querySelector("#ai-pill").textContent = `${status.ai_provider} connected`;
-    document.querySelector("#ai-status").textContent = `${status.ai_provider} is configured. Local greetings and PDF help remain available as fallbacks.`;
+    document.querySelector("#ai-status").textContent = `${status.ai_provider} is configured. Local greetings and document help remain available as fallbacks.`;
   }
 }).catch(() => {});
 
 document.querySelector('[data-page="flashcards"]')?.remove();
 document.querySelector("#flashcards")?.remove();
-document.querySelector("#tutor .muted").textContent = "Ask about your PDFs locally, or use the configured AI provider for broader questions.";
+document.querySelector("#tutor .muted").textContent = "Ask about your PDFs and images, or use the configured AI provider for broader questions.";
 document.querySelector("#tutor .kicker").textContent = "AI TUTOR · READY";
-document.querySelector("#chat .message.assistant").textContent = "Hi! I can help with general study questions or find answers in your uploaded PDFs. What would you like to work on?";
+document.querySelector("#chat .message.assistant").textContent = "Hi! I can help with general study questions or analyze your uploaded PDFs and JPG/PNG images. What would you like to work on?";
 document.querySelector("#settings .muted").textContent = "AI provider keys stay on your server. Offline document help and the study planner work without an AI key.";
 
 const quizSection = document.querySelector("#quiz");
 quizSection.innerHTML = `
-  <div class="section-head"><div><p class="kicker">PRACTICE & RETAIN</p><h2>Quiz Center</h2><p class="muted">Build a quick practice set from a topic or one of your PDFs.</p></div></div>
+  <div class="section-head"><div><p class="kicker">PRACTICE & RETAIN</p><h2>Quiz Center</h2><p class="muted">Build a quick practice set from a topic or one of your uploaded PDFs or images.</p></div></div>
   <div class="quiz-layout"><article class="quiz-builder"><p class="kicker">NEW PRACTICE SET</p><form id="quiz-form">
     <label>Topic <input id="quiz-topic" maxlength="200" placeholder="e.g. loops in Python"></label>
     <div class="or-divider">or choose a document</div><label>Study document <select id="quiz-document"><option value="">No document selected</option></select></label>
@@ -38,6 +38,7 @@ async function fillQuizDocuments() {
   const docs = await focusApi("/api/documents");
   document.querySelector("#quiz-document").innerHTML = '<option value="">No document selected</option>' + docs.map(d => `<option value="${d.id}">${focusEsc(d.title)}</option>`).join("");
 }
+window.fillQuizDocuments = fillQuizDocuments;
 async function loadQuizHistory() {
   const history = await focusApi("/api/quizzes");
   const node = document.querySelector("#quiz-history-list");
