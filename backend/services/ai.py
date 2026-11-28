@@ -109,21 +109,35 @@ def ask(
         try:
             import requests
             user_content = _build_openai_user_content(user_text, prepared_bytes, prepared_mime)
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {settings.groq_api_key}", "Content-Type": "application/json"},
-                json={"model": settings.groq_model, "messages": [
-                    {"role": "system", "content": "You are Smart Study, a clear and encouraging study tutor. If document context or an image is supplied, ground your answer in it and say if it does not contain the answer. When asked for code, provide a complete correct solution and explain it briefly."},
-                    {"role": "user", "content": user_content},
-                ]}, timeout=45,
-            )
-            response.raise_for_status()
-            answer = response.json()["choices"][0]["message"]["content"]
-            return answer or "I could not generate a response.", True
+            groq_models = [settings.groq_model]
+            if has_image:
+                vision_model = getattr(settings, "groq_vision_model", "meta-llama/llama-4-scout-17b-16e-instruct")
+                if vision_model and vision_model not in groq_models:
+                    groq_models.append(vision_model)
+
+            for idx, model_name in enumerate(groq_models):
+                try:
+                    response = requests.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {settings.groq_api_key}", "Content-Type": "application/json"},
+                        json={"model": model_name, "messages": [
+                            {"role": "system", "content": "You are Smart Study, a clear and encouraging study tutor. If document context or an image is supplied, ground your answer in it and say if it does not contain the answer. When asked for code, provide a complete correct solution and explain it briefly."},
+                            {"role": "user", "content": user_content},
+                        ]}, timeout=45,
+                    )
+                    response.raise_for_status()
+                    answer = response.json()["choices"][0]["message"]["content"]
+                    return answer or "I could not generate a response.", True
+                except Exception as exc:
+                    status = getattr(getattr(exc, "response", None), "status_code", None)
+                    if has_image and status in (400, 404, 422) and idx + 1 < len(groq_models):
+                        logger.warning("Groq model %s rejected image input (status %s); retrying with %s", model_name, status, groq_models[idx + 1])
+                        continue
+                    raise
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if has_image and status in (400, 404, 422):
-                logger.warning("Groq model %s rejected multimodal image input (status %s)", settings.groq_model, status)
+                logger.warning("Groq model rejected multimodal image input (status %s)", status)
                 if settings.openrouter_api_key or settings.gemini_api_key:
                     vision_unsupported_msg = "Groq model does not support image input; falling back."
                 else:
