@@ -188,7 +188,25 @@ async def upload_document(file: UploadFile = File(...)):
         for pg, text in page_text:
             for chunk in [text[i:i + 1200] for i in range(0, len(text), 1200) if text[i:i + 1200].strip()]:
                 con.execute("INSERT INTO document_chunks(document_id,page_number,content) VALUES(?,?,?)", (did, pg, chunk))
-    return {"id": did, "title": title, "pages": len(page_text), "file_type": file_type}
+    return {"id": did, "title": title, "pages": len(page_text), "file_type": file_type, "has_text": any(t.strip() for _, t in page_text)}
+
+
+class DocumentTextUpdate(BaseModel):
+    text_content: str = Field(max_length=100000)
+
+
+@app.patch("/api/documents/{document_id}/text")
+def update_document_text(document_id: int, payload: DocumentTextUpdate):
+    item = row("SELECT id FROM documents WHERE id=?", (document_id,))
+    if not item:
+        raise HTTPException(404, "Document not found")
+    cleaned = payload.text_content.strip()
+    with connect() as con:
+        con.execute("UPDATE documents SET text_content=? WHERE id=?", (cleaned, document_id))
+        con.execute("DELETE FROM document_chunks WHERE document_id=?", (document_id,))
+        for chunk in [cleaned[i:i + 1200] for i in range(0, len(cleaned), 1200) if cleaned[i:i + 1200].strip()]:
+            con.execute("INSERT INTO document_chunks(document_id,page_number,content) VALUES(?,?,?)", (document_id, 1, chunk))
+    return {"ok": True, "has_text": bool(cleaned)}
 
 
 @app.get("/api/documents/{document_id}")
@@ -318,7 +336,8 @@ def chat(req: ChatRequest):
                 )
         con.execute("INSERT INTO chat_messages(conversation_id,role,content,sources) VALUES(?,?,?,?)", (cid, "assistant", answer, str(sources)))
     provider = "local" if greeting else "groq" if settings.groq_api_key else "openrouter" if settings.openrouter_api_key else "gemini"
-    return {"conversation_id": cid, "answer": answer, "sources": sources, "live_ai": live, "mode": provider if live or greeting else "offline"}
+    needs_ocr = bool(is_image and not live and not (doc and (doc.get("text_content") or "").strip()))
+    return {"conversation_id": cid, "answer": answer, "sources": sources, "live_ai": live, "mode": provider if live or greeting else "offline", "needs_ocr": needs_ocr}
 
 
 class QuizRequest(BaseModel):

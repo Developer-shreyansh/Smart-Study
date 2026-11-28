@@ -3,9 +3,13 @@ from io import BytesIO
 import base64
 import logging
 import re
+import time
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
+_GROQ_VISION_CACHE: dict[str, tuple[float, list[str]]] = {}
+_GROQ_VISION_KEYWORDS = ("qwen3.8", "-vl", "vision", "muse-spark", "pixtral", "llava", "multimodal", "scout", "maverick")
+_GROQ_EXCLUDED_KEYWORDS = ("whisper", "tts", "guard", "safeguard", "prompt-guard")
 
 
 def smalltalk_response(prompt: str) -> str | None:
@@ -90,6 +94,35 @@ def _build_openai_user_content(user_text: str, image_bytes: bytes | None, image_
     ]
 
 
+def _discover_groq_vision_models(api_key: str) -> list[str]:
+    """Query Groq's /models endpoint (cached for 10m) to find active vision-capable model IDs."""
+    now = time.monotonic()
+    cached = _GROQ_VISION_CACHE.get(api_key)
+    if cached and now - cached[0] < 600:
+        return list(cached[1])
+    try:
+        import requests
+        resp = requests.get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        models = []
+        for item in resp.json().get("data", []):
+            mid = str(item.get("id", ""))
+            low = mid.lower()
+            if not mid or any(bad in low for bad in _GROQ_EXCLUDED_KEYWORDS):
+                continue
+            if any(good in low for good in _GROQ_VISION_KEYWORDS):
+                models.append(mid)
+        _GROQ_VISION_CACHE[api_key] = (now, models)
+        return list(models)
+    except Exception:
+        logger.debug("Could not fetch Groq model list", exc_info=True)
+        return []
+
+
 def ask(
     prompt: str,
     context: str = "",
@@ -111,14 +144,17 @@ def ask(
             user_content = _build_openai_user_content(user_text, prepared_bytes, prepared_mime)
             groq_models = [settings.groq_model]
             if has_image:
-                vision_model = getattr(settings, "groq_vision_model", "meta-llama/llama-4-scout-17b-16e-instruct")
+                vision_model = getattr(settings, "groq_vision_model", "qwen/qwen3.8-27b")
                 if vision_model:
                     if settings.groq_model == "openai/gpt-oss-20b":
                         groq_models = [vision_model]
                     elif vision_model not in groq_models:
                         groq_models.append(vision_model)
 
-            for idx, model_name in enumerate(groq_models):
+            discovered_added = False
+            idx = 0
+            while idx < len(groq_models):
+                model_name = groq_models[idx]
                 try:
                     response = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
@@ -133,9 +169,16 @@ def ask(
                     return answer or "I could not generate a response.", True
                 except Exception as exc:
                     status = getattr(getattr(exc, "response", None), "status_code", None)
-                    if has_image and status in (400, 404, 422) and idx + 1 < len(groq_models):
-                        logger.warning("Groq model %s rejected image input (status %s); retrying with %s", model_name, status, groq_models[idx + 1])
-                        continue
+                    if has_image and status in (400, 404, 422):
+                        if not discovered_added and idx + 1 >= len(groq_models):
+                            discovered_added = True
+                            for candidate in _discover_groq_vision_models(settings.groq_api_key):
+                                if candidate not in groq_models:
+                                    groq_models.append(candidate)
+                        if idx + 1 < len(groq_models):
+                            logger.warning("Groq model %s rejected image input (status %s); retrying with %s", model_name, status, groq_models[idx + 1])
+                            idx += 1
+                            continue
                     raise
         except Exception as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)

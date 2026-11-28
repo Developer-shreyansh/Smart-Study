@@ -17,7 +17,7 @@ class Settings:
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "") or (_configured_gemini_key if _configured_gemini_key.startswith("sk-or-") else "")
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openrouter/free")
     groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
-    groq_vision_model: str = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    groq_vision_model: str = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
     data_dir: Path = ROOT / "data"
 
