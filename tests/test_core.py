@@ -235,19 +235,33 @@ class SmartStudyCoreTests(unittest.TestCase):
         self.assertIsInstance(sent_contents, list)
         self.assertEqual(len(sent_contents), 2)
 
-    def test_groq_falls_back_to_vision_model_for_images(self):
+    def test_groq_uses_and_falls_back_to_vision_model_for_images(self):
         import requests as req_lib
-        fake_settings = self._fake_settings(groq_api_key="gsk_test", groq_vision_model="meta-llama/llama-4-scout-17b-16e-instruct")
         png_bytes = _make_image_bytes("PNG")
+
+        default_settings = self._fake_settings(groq_api_key="gsk_test", groq_vision_model="meta-llama/llama-4-scout-17b-16e-instruct")
+        ok_resp = MagicMock()
+        ok_resp.raise_for_status.return_value = None
+        ok_resp.json.return_value = {"choices": [{"message": {"content": "Direct vision answer."}}]}
+        with patch("backend.services.ai.settings", default_settings), patch("requests.post", return_value=ok_resp) as mock_post:
+            answer, live = ai_ask("Explain this image", image_bytes=png_bytes, image_mime="image/png")
+        self.assertTrue(live)
+        self.assertEqual(answer, "Direct vision answer.")
+        self.assertEqual(mock_post.call_args.kwargs["json"]["model"], "meta-llama/llama-4-scout-17b-16e-instruct")
+
+        custom_settings = self._fake_settings(
+            groq_api_key="gsk_test",
+            groq_model="llama-3.3-70b-versatile",
+            groq_vision_model="meta-llama/llama-4-scout-17b-16e-instruct",
+        )
         bad_resp = SimpleNamespace(status_code=400)
-        http_err = req_lib.HTTPError("model does not support images", response=bad_resp)
         first = MagicMock()
-        first.raise_for_status.side_effect = http_err
+        first.raise_for_status.side_effect = req_lib.HTTPError("model does not support images", response=bad_resp)
         second = MagicMock()
         second.raise_for_status.return_value = None
         second.json.return_value = {"choices": [{"message": {"content": "Groq vision read the image."}}]}
 
-        with patch("backend.services.ai.settings", fake_settings), patch("requests.post", side_effect=[first, second]) as mock_post:
+        with patch("backend.services.ai.settings", custom_settings), patch("requests.post", side_effect=[first, second]) as mock_post:
             answer, live = ai_ask("Explain this image", image_bytes=png_bytes, image_mime="image/png")
         self.assertTrue(live)
         self.assertEqual(answer, "Groq vision read the image.")

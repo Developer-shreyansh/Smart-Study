@@ -62,19 +62,19 @@ def _prepare_image_for_ai(image_bytes: bytes, image_mime: str) -> tuple[bytes, s
         from PIL import Image
         with Image.open(BytesIO(image_bytes)) as img:
             max_dim = max(img.size)
-            if max_dim <= 2048 and len(image_bytes) <= 4 * 1024 * 1024:
+            if max_dim <= 1600 and len(image_bytes) <= 2_500_000:
                 return image_bytes, image_mime
-            if max_dim > 2048:
-                scale = 2048 / max_dim
+            if max_dim > 1600:
+                scale = 1600 / max_dim
                 new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
                 img = img.resize(new_size, Image.Resampling.LANCZOS)
             out = BytesIO()
-            if image_mime == "image/png" and len(image_bytes) <= 4 * 1024 * 1024:
+            if image_mime == "image/png" and len(image_bytes) <= 2_500_000:
                 img.save(out, format="PNG", optimize=True)
                 return out.getvalue(), "image/png"
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
-            img.save(out, format="JPEG", quality=88, optimize=True)
+            img.save(out, format="JPEG", quality=85, optimize=True)
             return out.getvalue(), "image/jpeg"
     except Exception:
         return image_bytes, image_mime
@@ -112,8 +112,11 @@ def ask(
             groq_models = [settings.groq_model]
             if has_image:
                 vision_model = getattr(settings, "groq_vision_model", "meta-llama/llama-4-scout-17b-16e-instruct")
-                if vision_model and vision_model not in groq_models:
-                    groq_models.append(vision_model)
+                if vision_model:
+                    if settings.groq_model == "openai/gpt-oss-20b":
+                        groq_models = [vision_model]
+                    elif vision_model not in groq_models:
+                        groq_models.append(vision_model)
 
             for idx, model_name in enumerate(groq_models):
                 try:
